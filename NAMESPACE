@@ -1,0 +1,16 @@
+## export the R functions in the blrm package
+export(blrm_mono_ss, blrm_mono_ms, blrm_combo_ss, blrm_combo_ms)
+
+## below is for the blrm package
+importFrom(reshape2, dcast)
+importFrom(boot, corr)
+importFrom(rjags, jags.model, jags.samples)
+importFrom(mvtnorm, rmvnorm, dmvnorm)
+#importFrom(R2WinBUGS, write.model)
+importFrom(openxlsx, write.xlsx)
+
+## below is required for new CRAN checks
+importFrom("graphics", "abline", "arrows", "axis", "layout", "legend",
+           "mtext", "par", "plot", "points", "text", "barplot")
+importFrom("stats", "quantile", "sd", "update")
+importFrom("grDevices", "dev.off", "pdf", "rgb")

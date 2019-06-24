@@ -1,0 +1,15 @@
+Package: blrm
+Title: Dose Escalation Design in Phase I Oncology Trial Using Bayesian
+        Logistic Regression Modeling
+Version: 1.0-1
+Date: 2019-06-16
+Author: Furong Sun <furongs@vt.edu>, Zhonggai Li <zli@bostonbiomedical.com>
+Depends: R (>= 2.15.1)
+Imports: boot, rjags, mvtnorm, openxlsx, reshape2
+Description: Plan dose escalation design using adaptive Bayesian logistic regression modeling in Phase I oncology trial.
+Maintainer: Furong Sun <furongs@vt.edu>
+License: LGPL
+NeedsCompilation: no
+Packaged: 2019-06-21 18:16:05 UTC; furong
+Repository: CRAN
+Date/Publication: 2019-06-24 11:00:04 UTC
