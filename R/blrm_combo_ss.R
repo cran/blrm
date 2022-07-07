@@ -1,56 +1,13 @@
-if(getRversion() >= "2.15.1") utils::globalVariables(c("Omega1", "inverse", "p2", "log.alpha", "dmnorm", "p1", "alpha", "d", "logit<-", "dbern", 
-                                                       "s", "nb_pat", "p3", "p4", "Omega2", "p6", "p5", "eta", "d1", "d2", "pi1", "pi2", "pi12", "dnorm", "logit", "seeds", "probability"))
+if(getRversion() >= "2.15.1") utils::globalVariables("probability")
 
 blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   
-  ################### Below are the local functions to be used in BLRM
-  # BLRM for two drugs (in BUGS language): `~`: stochastic nodes; `<-`: deterministic nodes
-  blrm_combo <- function(){
-    
-    # prior for drug 1: sampling from bivariate normal distribution
-    Omega1[1:2,1:2] <- inverse(p2[,])
-    log.alpha[1:2] ~ dmnorm(p1[], Omega1[,])
-    
-    # prior for drug 2: sampling from bivariate normal distribution
-    Omega2[1:2,1:2] <- inverse(p4[,])
-    log.alpha[3:4] ~ dmnorm(p3[], Omega2[,])
-    
-    # prior for their interaction: sampling from normal distribution
-    tau <- 1/p6
-    eta ~ dnorm(p5, tau)
-    
-    # (alpha1, beta1), (alpha2, beta2)
-    alpha[1] <- exp(log.alpha[1])
-    alpha[2] <- exp(log.alpha[2])
-    alpha[3] <- exp(log.alpha[3])
-    alpha[4] <- exp(log.alpha[4])
-    
-    # loop over each data point
-    for(i in 1:nb_pat){
-        
-        # linear regression on logit
-        ## drug 1
-        logit(pi1[i]) <- log.alpha[1] + alpha[2] * d1[i]
-      
-        ## drug 2
-        logit(pi2[i]) <- log.alpha[3] + alpha[4] * d2[i]
-      
-        # odds of toxic probability (with interaction)
-        odds_pi12[i] <- exp(eta * exp(d1[i]) * exp(d2[i])) * (pi1[i] + pi2[i] - pi1[i] * pi2[i])/((1 - pi1[i]) * (1 - pi2[i]))
-         
-        # toxic probability (with interaction)
-        pi12[i] <- odds_pi12[i]/(1 + odds_pi12[i])
-        
-        # likelihood function for each data point
-        s[i] ~ dbern(pi12[i])
-    }
-  }
-  ##
-  
+  ################### the generic functions to be used ###################
   # probability of toxicity for the drug combo
-  tox_prob <- function(d1, d2, param){
-                          # d1: log(dose1/ref_dose1)
-                          # d2: log(dose2/ref_dose2)
+  tox_prob <- function(d1, d2, param){  
+    # d1: log(dose1/ref_dose1)
+    # d2: log(dose2/ref_dose2)
+    
     # drug 1
     logit_pi1 <- log(param[1]) + param[2] * d1
     pi1 <- exp(logit_pi1) / (1 + exp(logit_pi1))
@@ -59,7 +16,7 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
     logit_pi2 <- log(param[3]) + param[4] * d2
     pi2 <- exp(logit_pi2) / (1 + exp(logit_pi2))
     
-    # odds of the drug combo with the interaction term, eta
+    # odds of probability of toxicity of the drug combo
     odds_pi12 <- exp(param[5] * exp(d1) * exp(d2)) * (pi1  + pi2 - pi1 * pi2) / ((1 - pi1) * (1 - pi2))
     
     # probability of toxicity of the drug combo
@@ -70,9 +27,10 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   ##
   
   # prior for the parameters
-  prior_summary <- function(prior){ # mu: mean
-                                    # se: standard deviation
-                                    # corr: correlation
+  prior_summary <- function(prior){ 
+    # mu: mean
+    # se: standard deviation
+    # corr: correlation
     # extract prior components
     prior.drug1 <- prior[[1]]  # drug 1
     prior.drug2 <- prior[[2]]  # drug 2
@@ -103,61 +61,55 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
     
     # data for JAGS
     mydata <- list(nb_pat=sum(cohort_size), 
-                        s=data_dlt, 
-                       d1=data_sdose1, 
-                       d2=data_sdose2, 
-                       p1=prior_para$prior1[[1]], # prior mean for drug 1
-                       p2=prior_para$prior1[[2]], # prior covariance matrix for drug 1
-                       p3=prior_para$prior2[[1]], # prior mean for drug 2
-                       p4=prior_para$prior2[[2]], # prior covariance matrix for drug 2
-                       p5=prior_para$prior3[[1]], # prior mean for the interaction term, eta
-                       p6=prior_para$prior3[[2]]) # prior variance for the interaction term, eta
+                   s=data_dlt, 
+                   d1=data_sdose1, 
+                   d2=data_sdose2, 
+                   p1=prior_para$prior1[[1]], # prior mean for drug 1
+                   p2=prior_para$prior1[[2]], # prior covariance matrix for drug 1
+                   p3=prior_para$prior2[[1]], # prior mean for drug 2
+                   p4=prior_para$prior2[[2]], # prior covariance matrix for drug 2
+                   p5=prior_para$prior3[[1]], # prior mean for the interaction term, eta
+                   p6=prior_para$prior3[[2]]) # prior variance for the interaction term, eta
     
     # number of iterations per chain, e.g., (1 + 0.2) * 10000/2, since the first 20% will be chopped off;
     # there are 2 parallel chains
     niters <- (1 + burn_in) * nsamples/2
     
-    # path.model: the name of the file containing a description of 
-    #             the model in the JAGS dialect of the BUGS language
-    # path.model <- file.path(tempdir(), "model.file.txt")
-    # write a BUGS model in an ASCII file
-    # R2WinBUGS::write.model(blrm_combo, path.model)
-    
+    # justify the model for library(rjags)
     modelstring <- "model
     {
-       Omega1[1:2,1:2] <- inverse(p2[,])
-       log.alpha[1:2] ~ dmnorm(p1[], Omega1[,])
-       
-       Omega2[1:2,1:2] <- inverse(p4[,])
-       log.alpha[3:4] ~ dmnorm(p3[], Omega2[,])
+    Omega1[1:2,1:2] <- inverse(p2[,])
+    log.alpha[1:2] ~ dmnorm(p1[], Omega1[,])
     
-       tau <- 1/p6
-       eta ~ dnorm(p5, tau)
+    Omega2[1:2,1:2] <- inverse(p4[,])
+    log.alpha[3:4] ~ dmnorm(p3[], Omega2[,])
     
-       alpha[1] <- exp(log.alpha[1])
-       alpha[2] <- exp(log.alpha[2])
-       alpha[3] <- exp(log.alpha[3])
-       alpha[4] <- exp(log.alpha[4])
-       
-       for(i in 1:nb_pat){
-          logit(pi1[i]) <- log.alpha[1] + alpha[2] * d1[i]
-          logit(pi2[i]) <- log.alpha[3] + alpha[4] * d2[i]
-          odds_pi12[i] <- exp(eta * exp(d1[i]) * exp(d2[i])) * (pi1[i] + pi2[i] - pi1[i] * pi2[i])/((1 - pi1[i]) * (1 - pi2[i]))
-          pi12[i] <- odds_pi12[i]/(1 + odds_pi12[i])
-          s[i] ~ dbern(pi12[i])
-       }
+    tau <- 1/p6
+    eta ~ dnorm(p5, tau)
+    
+    alpha[1] <- exp(log.alpha[1])
+    alpha[2] <- exp(log.alpha[2])
+    alpha[3] <- exp(log.alpha[3])
+    alpha[4] <- exp(log.alpha[4])
+    
+    for(i in 1:nb_pat){
+    logit(pi1[i]) <- log.alpha[1] + alpha[2] * d1[i]
+    logit(pi2[i]) <- log.alpha[3] + alpha[4] * d2[i]
+    odds_pi12[i] <- exp(eta * exp(d1[i]) * exp(d2[i])) * (pi1[i] + pi2[i] - pi1[i] * pi2[i])/((1 - pi1[i]) * (1 - pi2[i]))
+    pi12[i] <- odds_pi12[i]/(1 + odds_pi12[i])
+    s[i] ~ dbern(pi12[i])
+    }
     }"
     
     # specify starting values for the parameters, random number generating (RNG) seeds, and RNG modules
     inits.list <- list(list(log.alpha=c(-3,0,-3,0), eta=0, .RNG.seed=seeds[1], .RNG.name="base::Wichmann-Hill"), 
                        list(log.alpha=c(-3,0,-3,0), eta=0, .RNG.seed=seeds[2], .RNG.name="base::Wichmann-Hill"))
-     
+    
     # rjags::jags.model: to create an object representing a Bayesian graphical model, specified 
     # with a BUGS-language description of the prior distribution, and a set of data; provide initial 
     # values for parameters with vague prior distributions
-    # jagsobj <- rjags::jags.model(path.model, data=mydata, n.chains=2, quiet=TRUE, inits=inits.list) # n.chains: the number of parallel chains for the model
-    jagsobj <- rjags::jags.model(textConnection(modelstring), data=mydata, n.chains=2, quiet=TRUE, inits=inits.list)
-    
+    jagsobj <- rjags::jags.model(textConnection(modelstring), 
+                                 data=mydata, n.chains=2, quiet=TRUE, inits=inits.list) # n.chains: the number of parallel chains for the model
     update(jagsobj, n.iter=niters, progress.bar="none")
     res <- rjags::jags.samples(jagsobj, c("alpha", "eta"), n.iter=niters, progress.bar="none")
     
@@ -175,52 +127,62 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
     log_para <- apply(posterior_param[,1:4], 2, log)
     log_para <- cbind(log_para, posterior_param[,5])
     
-    para_hat <- apply(log_para, 2, mean)  # point estimates (sample mean)
-    para_sd <-  apply(log_para, 2, sd)    # standard deviation of the point estimates
-    para_corr1 <- corr(log_para[,1:2])    # correlation coefficient between log(alpha1.hat) and log(beta1.hat)
-    para_corr2 <- corr(log_para[,3:4])    # correlation coefficient between log(alpha2.hat) and log(beta2.hat)
+    para_hat <- apply(log_para, 2, mean)  # MAP estimates
+    para_sd <-  apply(log_para, 2, sd)    # standard deviation of the MAP estimates
+    para_corr1 <- boot::corr(log_para[,1:2])    # correlation coefficient between log(alpha1.hat) and log(beta1.hat)
+    para_corr2 <- boot::corr(log_para[,3:4])    # correlation coefficient between log(alpha2.hat) and log(beta2.hat)
     posterior_para_summary <- list(para_hat=para_hat, para_sd=para_sd, para_corr1=para_corr1, para_corr2=para_corr2)
     
     # collect posterior point estimates for pi12, i.e., DLT rate.hat | data: for each set 
     # of posterior parameter point estimates, we have a posterior point estimate of DLT rate
     samples_sdose <- matrix(0, nprov_dose, nsamples)
     for(i in 1:nprov_dose){
-        for(j in 1:nsamples){
-            samples_sdose[i,j] <- tox_prob(sprov_dose[i,1], sprov_dose[i,2], posterior_param[j,])$pi12
-        }
+      for(j in 1:nsamples){
+        samples_sdose[i,j] <- tox_prob(sprov_dose[i,1], sprov_dose[i,2], posterior_param[j,])$pi12
+      }
     }
     
-    # interval probabilities by dose: obtain the probability that DLT rate.hat | data lies in each category interval
+    # interval probabilities by dose: obtain the probability that DLT rate lies in each category interval
     posterior_prob_summary <- matrix(0, length(category_bound)+1, nprov_dose)
     for(i in 1:nprov_dose){
-        posterior_prob_summary[,i] <- as.numeric(table(cut(samples_sdose[i,], breaks=c(0, category_bound[1], category_bound[2], 1), right=TRUE))/nsamples)
+      posterior_prob_summary[,i] <- as.numeric(table(cut(samples_sdose[i,], breaks=c(0, category_bound[1], category_bound[2], 1), right=TRUE))/nsamples)
     }
     
     # P(pi12 | data): mean, standard deviation, 0.025, 0.5(median), and 0.975 quantile
     posterior_pi_summary <- matrix(0, 5, nprov_dose)
     for(i in 1:nprov_dose){
-        posterior_pi_summary[,i] <- c(mean(samples_sdose[i,]), sd(samples_sdose[i,]), quantile(samples_sdose[i,], c(0.025, 0.5, 0.975)))
+      posterior_pi_summary[,i] <- c(mean(samples_sdose[i,]), sd(samples_sdose[i,]), quantile(samples_sdose[i,], c(0.025, 0.5, 0.975)))
     }
     
-    # the next dose: select the next dose with the highest probability of targeted toxicity among safe doses
+    # the next dose: select the dose with the highest probability of targeted toxicity among all the safe doses
     ## justify safe doses
     safe_dose_range <- (posterior_prob_summary[3,] <= ewoc) # posterior_prob_summary[3,]: (0.33, 1]
-    
     if(sum(safe_dose_range) != 0){
-       ## select the one with the highest probability of targeted toxicity
-       next_dose_index <- which.max(posterior_prob_summary[2, safe_dose_range])     # the safe dose level combination of drug 1 & 2 
-                                                                                    # with the highest probability of targeted toxicity
-       next_dose_level <- prov_dose[next_dose_index,]                               # the recommended dose level combination
-       next_dose_posterior_prob_summary <- posterior_prob_summary[,next_dose_index] # interval probabilities by dose
-       next_dose_posterior_pi_summary <- posterior_pi_summary[,next_dose_index]     # posterior summary of DLT rate
-       
-       # combine them to a list
-       next_dose <- list(dose=next_dose_level, 
-                         posterior_prob_summary=list(next_dose_posterior_prob_summary), 
-                         posterior_pi_summary=list(next_dose_posterior_pi_summary))     
+      
+      ## convert matrix to data.frame
+      posterior_prob_summary <- as.data.frame(posterior_prob_summary)
+      posterior_pi_summary <- as.data.frame(posterior_pi_summary)
+      names(posterior_prob_summary) <- paste(1:nrow(prov_dose))
+      names(posterior_pi_summary) <- names(posterior_prob_summary)
+      
+      # justify the dose with the highest probability of targeted toxicity
+      next_dose_index <- as.numeric(names(which.max(posterior_prob_summary[2,safe_dose_range]))) # justify the dose index
+      next_dose_level <- prov_dose[next_dose_index,]                               # the recommended drug combo level
+      next_dose_posterior_prob_summary <- posterior_prob_summary[,next_dose_index] # interval probabilities by dose
+      next_dose_posterior_pi_summary <- posterior_pi_summary[,next_dose_index]     # posterior summary of DLT rate
+      
+      # combine them to a list
+      next_dose <- list(index=next_dose_index,
+                        dose=next_dose_level, 
+                        posterior_prob_summary=list(next_dose_posterior_prob_summary), 
+                        posterior_pi_summary=list(next_dose_posterior_pi_summary))     
     }else{
-       next_dose <- NULL
+      next_dose <- NULL
     }
+    
+    # convert back to matrix
+    posterior_prob_summary <- as.matrix(posterior_prob_summary)
+    posterior_pi_summary <- as.matrix(posterior_pi_summary)
     
     # return what is needed
     return(list(posterior_prob_summary=posterior_prob_summary,
@@ -230,7 +192,7 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   }
   # end of a single cohort
   
-  ########################## done with defining local functions ##########################
+  ########################## done with defining generic functions ##########################
   
   # extract prior
   prior_para <- prior_summary(prior)
@@ -287,36 +249,36 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   t <- 1
   while(current_dose_index <= ndose){
     
-     current_cohort_size <- n_pat[current_dose_index]
-     current_dlt <- dlt_test[current_dose_index]
-     
-     # ... cumutatively
-     dose_index <- c(dose_index, current_dose_index)
-     cohort_size <- c(cohort_size, current_cohort_size)
-     dlt <- c(dlt, current_dlt)
+    current_cohort_size <- n_pat[current_dose_index]
+    current_dlt <- dlt_test[current_dose_index]
     
-     # for each cohort, statistical analysis is based on all the accumulated observed cohorts information
-     current_data_sdose1 <- rep(sdose[current_dose_index,1], current_cohort_size)
-     current_data_sdose2 <- rep(sdose[current_dose_index,2], current_cohort_size)
-     data_sdose1 <- c(data_sdose1, current_data_sdose1)
-     data_sdose2 <- c(data_sdose2, current_data_sdose2)
-     current_data_dlt <- ifelse(rep(current_dlt==0, current_cohort_size), rep(0, current_cohort_size), c(rep(1, current_dlt), rep(0, current_cohort_size-current_dlt)))
-     data_dlt <- c(data_dlt, current_data_dlt)
-     # start going through each observed cohort
-     cohort <- single_cohort()
-     cohort_all[[current_dose_index]] <- list(dose_index=dose_index,
-                                              cohort_size=cohort_size,
-                                              dlt=dlt,
-                                              posterior_prob=cohort$posterior_prob_summary,
-                                              posterior_para=cohort$posterior_para_summary,
-                                              posterior_pi=cohort$posterior_pi_summary,
-                                              next_dose=cohort$next_dose)
+    # ... cumutatively
+    dose_index <- c(dose_index, current_dose_index)
+    cohort_size <- c(cohort_size, current_cohort_size)
+    dlt <- c(dlt, current_dlt)
+    
+    # for each cohort, statistical analysis is based on all the accumulated observed cohorts information
+    current_data_sdose1 <- rep(sdose[current_dose_index,1], current_cohort_size)
+    current_data_sdose2 <- rep(sdose[current_dose_index,2], current_cohort_size)
+    data_sdose1 <- c(data_sdose1, current_data_sdose1)
+    data_sdose2 <- c(data_sdose2, current_data_sdose2)
+    current_data_dlt <- ifelse(rep(current_dlt==0, current_cohort_size), rep(0, current_cohort_size), c(rep(1, current_dlt), rep(0, current_cohort_size-current_dlt)))
+    data_dlt <- c(data_dlt, current_data_dlt)
+    # start going through each observed cohort
+    cohort <- single_cohort()
+    cohort_all[[current_dose_index]] <- list(dose_index=dose_index,
+                                             cohort_size=cohort_size,
+                                             dlt=dlt,
+                                             posterior_prob=cohort$posterior_prob_summary,
+                                             posterior_para=cohort$posterior_para_summary,
+                                             posterior_pi=cohort$posterior_pi_summary,
+                                             next_dose=cohort$next_dose)
     if(is.null(cohort$next_dose)){
-       # next dose can not be justified
-       break
+      # next dose can not be justified
+      break
     }else{
-       # continue to the next tested dose
-       current_dose_index <- current_dose_index + 1
+      # continue to the next tested dose
+      current_dose_index <- current_dose_index + 1
     }
     
     # progress meter
@@ -334,25 +296,18 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   # extract the next dose level information
   next_dose <- cohort_final$next_dose
   
-  # # extract the version number of the algorithm: e.g., "*_v1.R"
-  # files <- list.files(path=".", pattern="\\v[0-9]+.R$")
-  # vn <- regmatches(files, regexpr("\\v[0-9]+", files))[1]
-  # 
-  # # algorithm releasing date (year-month)
-  # rd <- format(Sys.Date(), "%Y-%m")
-  
   # construct the framework for the simulation output
   current_summary <- matrix(0, 25+2*nprov_dose+3+5+3+1+1+5, max(nprov_dose1, nprov_dose2)+3)
   current_summary <- as.data.frame(current_summary)
   for(i in 1:nrow(current_summary)){
-      for(j in 1:ncol(current_summary)){
-          current_summary[i,j] <- ""
-      }
+    for(j in 1:ncol(current_summary)){
+      current_summary[i,j] <- ""
+    }
   }
   
   # Header
   current_summary[1,1] <- "Header"
-  current_summary[2,2:4] <- c("algorithm running date", "drug name", "RNG seeds")
+  current_summary[2,2:4] <- c("simulation running date", "drug name", "RNG seeds")
   current_summary[3,2:4] <- c(paste(Sys.Date()), paste(c(drug1_name, drug2_name), collapse=", "), paste(seeds, collapse=", "))
   
   # Input
@@ -395,7 +350,7 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   current_summary[25,3:4] <- paste("drug", 1:2)
   current_summary[26:(26+nprov_dose-1),3:4] <- prov_dose
   for(i in 1:nprov_dose){
-      current_summary[26+i-1,5:9] <- round(pi_posterior[,i], 5)
+    current_summary[26+i-1,5:9] <- round(pi_posterior[,i], 5)
   }
   
   ## interval probabilities by dose
@@ -407,7 +362,7 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   current_summary[26+nprov_dose+1,3:4] <- paste("drug", 1:2)
   current_summary[(26+nprov_dose+1+1):(26+2*nprov_dose+2-1),3:4] <- prov_dose
   for(i in 1:nprov_dose){
-      current_summary[26+nprov_dose+1+1+i-1,5:7] <- round(prob_posterior[,i], 5)
+    current_summary[26+nprov_dose+1+1+i-1,5:7] <- round(prob_posterior[,i], 5)
   }
   
   ## posterior parameter estimates
@@ -419,7 +374,7 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   current_summary[(26+2*nprov_dose+3+3),c(4,6)] <- round(c(para_posterior$para_corr1, para_posterior$para_corr2), 3)
   
   ## recommended next dose
-  # dose level
+  # dose combo
   current_summary[(25+2*nprov_dose+3+5),2] <- paste0("next dose: drug 1=", next_dose$dose[1], ", drug 2=", next_dose$dose[2])
   # interval probabilities by dose
   current_summary[(25+2*nprov_dose+3+5+1),3] <- "interval probabilities by dose"
@@ -433,113 +388,124 @@ blrm_combo_ss <- function(prior, data, output_excel=FALSE, output_pdf=FALSE){
   current_summary[(25+2*nprov_dose+3+5+3+1+1+1):(25+2*nprov_dose+3+5+3+1+1+5),5] <- round(unlist(next_dose$posterior_pi_summary), 5)
   
   if(output_excel==TRUE){   
-     
-     # write the simulation output to a .xlsx file
-     output_1 <- current_summary[1:22,]
-     output_2 <- current_summary[23:(25+2*nprov_dose+3+5+3+1+1+5),]
-     
-     output_3 <- as.matrix(current_summary[(26+nprov_dose+1):(26+2*nprov_dose+2-1),3:7])
-     output_3 <- output_3[-1,-c(3:4)]
-     rownames(output_3) <- NULL
-     colnames(output_3) <- c("drug1", "drug2", "value")
-     output_3 <- as.data.frame(output_3)
-     output_3_wide <- dcast(output_3, drug2 ~ drug1, value.var="value")
-     rownames(output_3_wide) <- output_3_wide[,1]
-     output_3_wide <- output_3_wide[,-1]
-     col_order <- as.character(sort(as.numeric(names(output_3_wide)))) # I want to order the columns using dose levels of drug 1
-     output_3_wide <- output_3_wide[,col_order]
-     
-     ##
-     output_3_wide_plot <- output_3_wide
-     output_3_wide_plot <- apply(output_3_wide_plot, 2, as.numeric)
-     ##
-     
-     added_col <- rownames(output_3_wide)
-     added_row <- c("", names(output_3_wide))
-     
-     output_3_wide <- cbind(added_col, output_3_wide)
-     output_3_wide <- as.matrix(output_3_wide)
-     colnames(output_3_wide) <- rownames(output_3_wide) <- NULL
-     output_3_wide <- rbind(added_row, output_3_wide)
-     rownames(output_3_wide) <- NULL
-     
-     output_3_wide <- rbind(rep("", nrow(output_3_wide)), output_3_wide)
-     output_3_wide <- cbind(rep("", nrow(output_3_wide)), output_3_wide)
-     output_3_wide[1,6] <- paste0("Drug 1 (", dose1_unit, ")")
-     output_3_wide[6,1] <- paste0("Drug 2 (", dose2_unit, ")")
-     
-     list_output <- list("Sheet 1"=output_1, 
-                         "Sheet 2"=output_2, 
-                         "Sheet 3"=output_3_wide)
-     suppressMessages(openxlsx::write.xlsx(list_output, file=paste0(drug1_name, "-", drug2_name, "_BLRM_ss_", Sys.Date(), ".xlsx"), colNames=FALSE, rowNames=FALSE))
-     
+    
+    # write the simulation output to a .xlsx file
+    output_1 <- current_summary[1:22,]
+    output_2 <- current_summary[23:(25+2*nprov_dose+3+5+3+1+1+5),]
+    
+    output_3 <- as.matrix(current_summary[(26+nprov_dose+1):(26+2*nprov_dose+2-1),3:7])
+    output_3 <- output_3[-1,-c(3:4)]
+    rownames(output_3) <- NULL
+    colnames(output_3) <- c("drug1", "drug2", "value")
+    output_3 <- as.data.frame(output_3)
+    output_3_wide <- reshape2::dcast(output_3, drug2 ~ drug1, value.var="value")
+    rownames(output_3_wide) <- output_3_wide[,1]
+    output_3_wide <- output_3_wide[,-1]
+    col_order <- as.character(sort(as.numeric(names(output_3_wide)))) # I want to order the columns using dose levels of drug 1
+    output_3_wide <- output_3_wide[,col_order]
+    
+    ##
+    output_3_wide_plot <- output_3_wide
+    output_3_wide_plot <- apply(output_3_wide_plot, 2, as.numeric)
+    ##
+    
+    added_col <- rownames(output_3_wide)
+    added_row <- c("", names(output_3_wide))
+    
+    output_3_wide <- cbind(added_col, output_3_wide)
+    output_3_wide <- as.matrix(output_3_wide)
+    colnames(output_3_wide) <- rownames(output_3_wide) <- NULL
+    output_3_wide <- rbind(added_row, output_3_wide)
+    rownames(output_3_wide) <- NULL
+    
+    output_3_wide <- rbind(rep("", nrow(output_3_wide)), output_3_wide)
+    output_3_wide <- cbind(rep("", nrow(output_3_wide)), output_3_wide)
+    output_3_wide[1,6] <- paste0("Drug 1 (", dose1_unit, ")")
+    output_3_wide[6,1] <- paste0("Drug 2 (", dose2_unit, ")")
+    
+    list_output <- list("Sheet 1" = output_1, 
+                        "Sheet 2" = output_2, 
+                        "Sheet 3" = output_3_wide)
+    suppressMessages(openxlsx::write.xlsx(list_output, file=paste0(drug1_name, "-", drug2_name, "_BLRM_ss_", Sys.Date(), ".xlsx"), colNames=FALSE, rowNames=FALSE))
   }
   
   if(output_pdf==TRUE){
-     
-     pdf(file=paste0(drug1_name, "-", drug2_name, "_BLRM_ss_", Sys.Date(), ".pdf"), width=10, height=10)
-     
-     ###### Interval Probabilities by Dose: `(0.33, 1]' is our interest of target ######
-     prob_posterior_3 <- cbind(prov_dose, prob_posterior[3,]) # dim(prob_posterior_3): 3 * nrow(prov_dose)
-     names(prob_posterior_3) <- c("drug1", "drug2", "probability")
-     prob_posterior_3 <- transform(prob_posterior_3, level=ifelse(probability > ewoc, 1, 0))
-     prob_posterior_3_wide <- reshape2::dcast(prob_posterior_3[,-3], drug2 ~ drug1, value.var="level") # convert ``long" to ``wide"
-     prob_posterior_3_wide <- prob_posterior_3_wide[,-1]
-     rownames(prob_posterior_3_wide) <- paste(prov_dose2)
-     colnames(prob_posterior_3_wide) <- paste(prov_dose1)
-     cols <- matrix(NA, nrow=length(prov_dose2), ncol=length(prov_dose1))
-     for(i in 1:nrow(prob_posterior_3_wide)){
-         for(j in 1:ncol(prob_posterior_3_wide)){
-             cols[i,j] <- ifelse(prob_posterior_3_wide[i,j]==1, "red", "green")
-         }
-     }
-     ## generate the plot
-     plot(NA, NA, type='n', xaxt='n', yaxt='n', cex.lab=1.5, cex.main=2,
-          xlim=range(1:length(prov_dose1)), 
-          ylim=range(1:length(prov_dose2)),  
-          xlab=paste0(drug1_name, "(", dose1_unit, ")"), 
-          ylab=paste0(drug2_name, "(", dose2_unit, ")"), 
-          main="Dose Category")
-     abline(h=1:length(prov_dose2), v=1:length(prov_dose1), lty=2, lwd=1, col="gray")
-     axis(1, at=1:length(prov_dose1), labels=paste(prov_dose1))        # 1: bottom
-     axis(2, at=1:length(prov_dose2), labels=paste(prov_dose2), las=2) # 2: left
-     # add dose level combinations
-     for(i in 1:length(prov_dose2)){
-         for(j in 1:length(prov_dose1)){
-             points(j, i, pch=19, col=cols[i,j], cex=4)
-         }
-     }
-     legend("topright", c(" <= EWOC", " > EWOC"), cex=1.1,
-            pch=rep(19, 2), col=c("green", "red"), pt.cex=2,
-            xpd=TRUE, horiz=TRUE, inset=c(0, -0.06), bty='n')
-     
-     ###### Posterior Distribution of DLT rate for each dose level combination ######
-     labels <- apply(prov_dose, 1, paste, collapse=",") # labels of x axis
-     plot(1:nrow(prov_dose), pi_posterior[4,], type="p", pch=20, xlab="drug combo", xaxt='n', cex.lab=1.5,
-          ylab="DLT rate", ylim=c(0, max(pi_posterior)), main="Posterior Distribution of DLT Rate", cex.main=2.0, bty='n')
-     axis(1, at=1:nrow(prov_dose), labels=FALSE)
-     text(x=1:nrow(prov_dose), par("usr")[3]-0.03, labels=labels, srt=90, pos=1, xpd=TRUE, cex=0.5)
-     # 95% credible interval
-     arrows(1:nrow(prov_dose), pi_posterior[3,], 1:nrow(prov_dose), pi_posterior[5,], code=3, angle=90, length=0.1, lwd=1.5, col=1) 
-     if(max(pi_posterior[5,]) >= category_bound[2]){
-        abline(h=category_bound, lty=2, col=c(rgb(0,1,0,alpha=0.8), rgb(1,0,0,alpha=0.8))) 
-        legend("top", c(paste(category_bound), "median", "95% credible interval"), 
-               lty=c(2,2,NA,1), lwd=c(1,1,NA,1.5), pch=c(NA,NA,20,NA), 
-               col=c(rgb(0,1,0,alpha=0.8), rgb(1,0,0,alpha=0.8), 1, 1), 
-               xpd=TRUE, horiz=TRUE, inset=c(0, -0.035), bty='n')
-     }else if((max(pi_posterior[5,]) >= category_bound[1]) && (max(pi_posterior[5,]) < category_bound[2])){
-        abline(h=category_bound[1], lty=2, col=rgb(0,1,0,alpha=0.8)) 
-        legend("top", c(paste(category_bound[1]), "median", "95% credible interval"), 
-               lty=c(2,NA,1), lwd=c(1,NA,1.5), pch=c(NA,20,NA), 
-               col=c(rgb(0,1,0,alpha=0.8), 1, 1), bty='n',
-               xpd=TRUE, horiz=TRUE, inset=c(0, -0.035))
-     }else{
-        legend("top", c("median", "95% credible interval"), 
-               lty=c(NA,1), lwd=c(NA,1.5), pch=c(20,NA), col=c(1,1),
-               xpd=TRUE, horiz=TRUE, inset=c(0, -0.035), bty='n')
-     }
-     
-     dev.off()
+    
+    pdf(file=paste0(drug1_name, "-", drug2_name, "_BLRM_ss_", Sys.Date(), ".pdf"), width=10, height=10)
+    
+    ###### Interval Probabilities by Dose: `(0.33, 1]' is our interest of target ######
+    prob_posterior_3 <- cbind(prov_dose, prob_posterior[3,]) # dim(prob_posterior_3): 3 * nrow(prov_dose)
+    names(prob_posterior_3) <- c("drug1", "drug2", "probability")
+    prob_posterior_3 <- transform(prob_posterior_3, level=ifelse(probability > ewoc, 1, 0))
+    for(i in 1:nrow(prob_posterior_3)){
+      if(as.numeric(rownames(prob_posterior_3[i,])) == as.numeric(next_dose$index)){
+        prob_posterior_3[i,4] <- 2
+      }
+    }
+    # convert data.frame from ``long" to ``wide"
+    prob_posterior_3_wide <- reshape2::dcast(prob_posterior_3[,-3], drug2 ~ drug1, value.var="level")
+    prob_posterior_3_wide <- prob_posterior_3_wide[,-1]
+    rownames(prob_posterior_3_wide) <- paste(prov_dose2)
+    colnames(prob_posterior_3_wide) <- paste(prov_dose1)
+    cols <- matrix(NA, nrow=length(prov_dose2), ncol=length(prov_dose1))
+    for(i in 1:nrow(prob_posterior_3_wide)){
+      for(j in 1:ncol(prob_posterior_3_wide)){
+        if(prob_posterior_3_wide[i,j]==0){
+          cols[i,j] <- "green"
+        }else if(prob_posterior_3_wide[i,j]==1){
+          cols[i,j] <- "red"
+        }else{
+          cols[i,j] <- "green" # "blue"
+        }
+      }
+    }
+    ## generate the plot
+    plot(NA, NA, type='n', xaxt='n', yaxt='n', cex.lab=1.5, cex.main=2,
+         xlim=range(1:length(prov_dose1)), 
+         ylim=range(1:length(prov_dose2)),  
+         xlab=paste0(drug1_name, "(", dose1_unit, ")"), 
+         ylab=paste0(drug2_name, "(", dose2_unit, ")"), 
+         main="Dose combo Categorization")
+    abline(h=1:length(prov_dose2), v=1:length(prov_dose1), lty=2, lwd=1, col="gray")
+    axis(1, at=1:length(prov_dose1), labels=paste(prov_dose1), las=0) # 1: bottom; labels are parallel (=0) or perpendicular(=2) to axis
+    axis(2, at=1:length(prov_dose2), labels=paste(prov_dose2), las=2) # 2: left
+    # add dose combos falling within different categories
+    for(i in 1:length(prov_dose2)){
+        for(j in 1:length(prov_dose1)){
+            points(j, i, pch=19, col=cols[i,j], cex=4)
+        }
+    }
+    legend("topright", c(" <= EWOC", " > EWOC"),# "Recommended Next Dose"), 
+           cex=1.1, pch=rep(19, 2), col=c("green", "red"),# "blue"), 
+           pt.cex=2, xpd=TRUE, horiz=TRUE, inset=c(0, -0.045), bty='n')
+    
+    ###### Posterior Distribution of DLT Rate for each dose combo ######
+    labels <- apply(prov_dose, 1, paste, collapse=",") # labels of x axis
+    plot(1:nrow(prov_dose), pi_posterior[4,], type="p", pch=20, xlab="drug combo", xaxt='n', cex.lab=1.5,
+         ylab="DLT rate", ylim=c(0, max(pi_posterior)), main="Posterior Distribution of DLT Rate", cex.main=2.0, bty='n')
+    axis(1, at=1:nrow(prov_dose), labels=FALSE)
+    text(x=1:nrow(prov_dose), par("usr")[3]-0.03, labels=labels, srt=90, pos=1, xpd=TRUE, cex=0.5)
+    # 95% credible interval
+    arrows(1:nrow(prov_dose), pi_posterior[3,], 1:nrow(prov_dose), pi_posterior[5,], code=3, angle=90, length=0.1, lwd=1.5, col=1) 
+    if(max(pi_posterior[5,]) >= category_bound[2]){
+      abline(h=category_bound, lty=2, col=c(rgb(0,1,0,alpha=0.8), rgb(1,0,0,alpha=0.8))) 
+      legend("top", c(paste(category_bound), "median", "95% credible interval"), 
+             lty=c(2,2,NA,1), lwd=c(1,1,NA,1.5), pch=c(NA,NA,20,NA), 
+             col=c(rgb(0,1,0,alpha=0.8), rgb(1,0,0,alpha=0.8), 1, 1), 
+             xpd=TRUE, horiz=TRUE, inset=c(0, -0.035), bty='n')
+    }else if((max(pi_posterior[5,]) >= category_bound[1]) && (max(pi_posterior[5,]) < category_bound[2])){
+      abline(h=category_bound[1], lty=2, col=rgb(0,1,0,alpha=0.8)) 
+      legend("top", c(paste(category_bound[1]), "median", "95% credible interval"), 
+             lty=c(2,NA,1), lwd=c(1,NA,1.5), pch=c(NA,20,NA), 
+             col=c(rgb(0,1,0,alpha=0.8), 1, 1), bty='n',
+             xpd=TRUE, horiz=TRUE, inset=c(0, -0.035))
+    }else{
+      legend("top", c("median", "95% credible interval"), 
+             lty=c(NA,1), lwd=c(NA,1.5), pch=c(20,NA), col=c(1,1),
+             xpd=TRUE, horiz=TRUE, inset=c(0, -0.035), bty='n')
+    }
+    
+    dev.off()
   }
   
   return(list(prob_posterior=prob_posterior,    # interval probabilities by dose

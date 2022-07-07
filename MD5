@@ -1,9 +1,9 @@
-d41d8cd98f00b204e9800998ecf8427e *ChangeLog
-0f57e91bc8a174b8d459b1125a83e864 *DESCRIPTION
-b397538a2bf55dc0e1db8b5ca9b0c6e5 *NAMESPACE
-014463aca9bfa94c067d0f86d9fd3498 *R/blrm_combo_ms.R
-68cb1a1e5de80e3d5d501052802962fd *R/blrm_combo_ss.R
-de30c799679480a13fe0c652737ad792 *R/blrm_mono_ms.R
-8e3ad03b3126f1721923c510cc12b49e *R/blrm_mono_ss.R
+a61a2fe8ace9e948e7f7ed98642fd324 *ChangeLog
+b5a661682cc067d1fc6eff2411cab7ec *DESCRIPTION
+f1d042b6a932c91557dcd3b8013c0033 *NAMESPACE
+5235db210524397ba57f6dca3bab9f99 *R/blrm_combo_ms.R
+f73c568d495a2af1abd8d78fdaa3b2c1 *R/blrm_combo_ss.R
+c8dc9cda7f2923a6b67c2f8b7f12053a *R/blrm_mono_ms.R
+6ccc7eb3451ff0931592f7c1d1f82fba *R/blrm_mono_ss.R
 7aa5157e15a2ea6f5a4fe802193c4511 *README.md
-108347183521b8f850dffad071fe0eff *man/blrm.Rd
+505d8a07542f5e5fb52d2446baa1cf6b *man/blrm.Rd
